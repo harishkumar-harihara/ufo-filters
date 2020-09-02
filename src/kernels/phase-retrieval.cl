@@ -20,7 +20,7 @@
  * License along with this library.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define COMMON_SETUP_TIE                                \
+#define COMMON_FREQUENCY_SETUP                          \
     const int width = get_global_size(0);               \
     const int height = get_global_size(1);              \
     int idx = get_global_id(0);                         \
@@ -28,7 +28,10 @@
     float n_idx = (idx >= width >> 1) ? idx - width : idx; \
     float n_idy = (idy >= height >> 1) ? idy - height : idy; \
     n_idx = n_idx / width; \
-    n_idy = n_idy / height; \
+    n_idy = n_idy / height;
+
+#define COMMON_SETUP_TIE                                                     \
+    COMMON_FREQUENCY_SETUP;                                                  \
     float sin_arg = prefac.x * (n_idx * n_idx) + prefac.y * (n_idy * n_idy); \
 
 #define COMMON_SETUP    \
@@ -54,6 +57,25 @@ ctf_method(float2 prefac, float regularize_rate, float binary_filter_rate, float
         output[idy * width + idx] = 0.0f;
     else
         output[idy * width + idx] = 0.5f / (sin_value + pow(10, -regularize_rate));
+}
+
+kernel void
+ctf_multidistance_method(global float *distances,
+                         unsigned int num_distances,
+                         float wavelength,
+                         float pixel_size,
+                         float regularize_rate,
+                         global float *output)
+{
+    COMMON_FREQUENCY_SETUP;
+    float result = 0.0f;
+    float k_2 = n_idx * n_idx / pixel_size / pixel_size + n_idy * n_idy / pixel_size / pixel_size;
+
+    for (unsigned int i = 0; i < num_distances; i++) {
+        result += 2 * sin (M_PI * wavelength * k_2 * distances[i]);
+    }
+
+    output[idy * width + idx] = 1.0f / (result + pow(10, -regularize_rate));
 }
 
 kernel void
