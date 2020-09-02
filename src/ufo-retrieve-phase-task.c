@@ -368,6 +368,7 @@ ufo_retrieve_phase_task_set_property (GObject *object,
                                       GParamSpec *pspec)
 {
     UfoRetrievePhaseTaskPrivate *priv = UFO_RETRIEVE_PHASE_TASK_GET_PRIVATE (object);
+    GValueArray *array;
 
     switch (property_id) {
         case PROP_METHOD:
@@ -377,8 +378,11 @@ ufo_retrieve_phase_task_set_property (GObject *object,
             priv->energy = g_value_get_float (value);
             break;
         case PROP_DISTANCE:
-            g_value_array_free (priv->distance);
-            priv->distance = g_value_array_copy (g_value_get_boxed (value));
+            array = (GValueArray *) g_value_get_boxed (value);
+            if (array) {
+                g_value_array_free (priv->distance);
+                priv->distance = g_value_array_copy (array);
+            }
             break;
         case PROP_DISTANCE_X:
             priv->distance_x = g_value_get_float (value);
