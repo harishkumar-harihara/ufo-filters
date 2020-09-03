@@ -32,7 +32,7 @@
 typedef enum {
     METHOD_TIE = 0,
     METHOD_CTF,
-    METHOD_MCTF,
+    METHOD_CTF_MULTI,
     METHOD_QP,
     METHOD_QP2,
     N_METHODS
@@ -41,7 +41,7 @@ typedef enum {
 static GEnumValue method_values[] = {
     { METHOD_TIE,           "METHOD_TIE",           "tie" },
     { METHOD_CTF,           "METHOD_CTF",           "ctf" },
-    { METHOD_MCTF,          "METHOD_MCTF",          "mctf" },
+    { METHOD_CTF_MULTI,     "METHOD_CTF_MULTI",     "ctf_multidistance" },
     { METHOD_QP,            "METHOD_QP",            "qp" },
     { METHOD_QP2,           "METHOD_QP2",           "qp2" },
     { 0, NULL, NULL}
@@ -120,15 +120,15 @@ ufo_retrieve_phase_task_setup (UfoTask *task,
                      "Either both, distance_x and distance_y must be non-zero, or distance must be specified");
         return;
     }
-    if (priv->distance->n_values > 1 && priv->method != METHOD_MCTF) {
+    if (priv->distance->n_values > 1 && priv->method != METHOD_CTF_MULTI) {
         g_set_error (error, UFO_TASK_ERROR, UFO_TASK_ERROR_SETUP,
-                     "When multiple distances are speicified method must be set to \"mctf\"");
+                     "When multiple distances are speicified method must be set to \"ctf_multidistance\"");
         return;
     }
 
     priv->kernels[METHOD_TIE] = ufo_resources_get_kernel (resources, "phase-retrieval.cl", "tie_method", NULL, error);
     priv->kernels[METHOD_CTF] = ufo_resources_get_kernel (resources, "phase-retrieval.cl", "ctf_method", NULL, error);
-    priv->kernels[METHOD_MCTF] = ufo_resources_get_kernel (resources, "phase-retrieval.cl", "ctf_multidistance_method", NULL, error);
+    priv->kernels[METHOD_CTF_MULTI] = ufo_resources_get_kernel (resources, "phase-retrieval.cl", "ctf_multidistance_method", NULL, error);
     priv->kernels[METHOD_QP] = ufo_resources_get_kernel (resources, "phase-retrieval.cl", "qp_method", NULL, error);
     priv->kernels[METHOD_QP2] = ufo_resources_get_kernel (resources, "phase-retrieval.cl", "qp2_method", NULL, error);
 
@@ -231,7 +231,7 @@ ufo_retrieve_phase_task_process (UfoTask *task,
 
         method_kernel = priv->kernels[(gint)priv->method];
 
-        if (priv->method == METHOD_MCTF) {
+        if (priv->method == METHOD_CTF_MULTI) {
             lambda = 6.62606896e-34 * 299792458 / (priv->energy * 1.60217733e-16);
             distances = g_malloc0 (priv->distance->n_values * sizeof (gfloat));
             for (i = 0; i < priv->distance->n_values; i++) {
@@ -264,7 +264,7 @@ ufo_retrieve_phase_task_process (UfoTask *task,
             global_work_size[0] >>= 1;
         }
         ufo_profiler_call (profiler, cmd_queue, method_kernel, requisition->n_dims, global_work_size, NULL);
-        if (priv->method == METHOD_MCTF) {
+        if (priv->method == METHOD_CTF_MULTI) {
             UFO_RESOURCES_CHECK_CLERR (clReleaseMemObject (distances_mem));
         }
     }
@@ -276,7 +276,7 @@ ufo_retrieve_phase_task_process (UfoTask *task,
         ufo_buffer_copy (priv->filter_buffer, output);
     }
     else {
-        if (priv->method == METHOD_MCTF) {
+        if (priv->method == METHOD_CTF_MULTI) {
             /* Sum input frequencies first, then proceed wth complex division */
             in_sum_mem = clCreateBuffer (priv->context,
                                          CL_MEM_READ_WRITE,
@@ -308,7 +308,7 @@ ufo_retrieve_phase_task_process (UfoTask *task,
         UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->mult_by_value_kernel, 2, sizeof (cl_mem), &out_mem));
         ufo_profiler_call (profiler, cmd_queue, priv->mult_by_value_kernel, requisition->n_dims, requisition->dims, NULL);
 
-        if (priv->method == METHOD_MCTF) {
+        if (priv->method == METHOD_CTF_MULTI) {
             UFO_RESOURCES_CHECK_CLERR (clReleaseMemObject (in_sum_mem));
         }
     }
