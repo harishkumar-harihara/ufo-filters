@@ -133,7 +133,7 @@ ufo_retrieve_phase_task_setup (UfoTask *task,
     priv->kernels[METHOD_QP2] = ufo_resources_get_kernel (resources, "phase-retrieval.cl", "qp2_method", NULL, error);
 
     priv->mult_by_value_kernel = ufo_resources_get_kernel (resources, "phase-retrieval.cl", "mult_by_value", NULL, error);
-    priv->freq_sum_kernel = ufo_resources_get_kernel (resources, "complex.cl", "c_add", NULL, error);
+    priv->freq_sum_kernel = ufo_resources_get_kernel (resources, "phase-retrieval.cl", "ctf_multi_add_frequencies", NULL, error);
 
     UFO_RESOURCES_CHECK_SET_AND_RETURN (clRetainContext(priv->context), error);
 
@@ -212,8 +212,9 @@ ufo_retrieve_phase_task_process (UfoTask *task,
     UfoProfiler *profiler;
     gsize global_work_size[3];
     cl_int cl_err;
-    gint i;
-    gfloat *distances, lambda;
+    guint i;
+    gfloat *distances, lambda, distance;
+    gfloat fill_pattern = 0.0f;
 
     cl_mem current_in_mem, in_sum_mem, in_mem, out_mem, filter_mem, distances_mem;
     cl_kernel method_kernel;
@@ -224,6 +225,13 @@ ufo_retrieve_phase_task_process (UfoTask *task,
     node = UFO_GPU_NODE (ufo_task_node_get_proc_node (UFO_TASK_NODE (task)));
     cmd_queue = ufo_gpu_node_get_cmd_queue (node);
     profiler = ufo_task_node_get_profiler (UFO_TASK_NODE (task));
+
+    global_work_size[0] = requisition->dims[0];
+    global_work_size[1] = requisition->dims[1];
+    if (!priv->output_filter) {
+        /* Filter is real as opposed to the complex input, so the width is only half of the interleaved input */
+        global_work_size[0] >>= 1;
+    }
 
     if (ufo_buffer_cmp_dimensions (priv->filter_buffer, requisition) != 0) {
         ufo_buffer_resize (priv->filter_buffer, requisition);
@@ -257,12 +265,6 @@ ufo_retrieve_phase_task_process (UfoTask *task,
             UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (method_kernel, 3, sizeof (gfloat), &priv->frequency_cutoff));
             UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (method_kernel, 4, sizeof (cl_mem), &filter_mem));
         }
-        global_work_size[0] = requisition->dims[0];
-        global_work_size[1] = requisition->dims[1];
-        if (!priv->output_filter) {
-            /* Filter is real as opposed to the complex input, so the width is only half of the interleaved input */
-            global_work_size[0] >>= 1;
-        }
         ufo_profiler_call (profiler, cmd_queue, method_kernel, requisition->n_dims, global_work_size, NULL);
         if (priv->method == METHOD_CTF_MULTI) {
             UFO_RESOURCES_CHECK_CLERR (clReleaseMemObject (distances_mem));
@@ -280,22 +282,23 @@ ufo_retrieve_phase_task_process (UfoTask *task,
             /* Sum input frequencies first, then proceed wth complex division */
             in_sum_mem = clCreateBuffer (priv->context,
                                          CL_MEM_READ_WRITE,
-                                         requisition->dims[0] * requisition->dims[1] * sizeof(float) * 2,
+                                         requisition->dims[0] * requisition->dims[1] * sizeof(float),
                                          NULL,
                                          &cl_err);
             UFO_RESOURCES_CHECK_CLERR (cl_err);
-            UFO_RESOURCES_CHECK_CLERR (clEnqueueCopyBuffer (cmd_queue,
-                                                            ufo_buffer_get_device_array (inputs[0], cmd_queue),
-                                                            in_sum_mem,
-                                                            0, 0,
-                                                            ufo_buffer_get_size (inputs[0]),
+            UFO_RESOURCES_CHECK_CLERR (clEnqueueFillBuffer (cmd_queue, in_sum_mem, &fill_pattern, sizeof (cl_float),
+                                                            0, requisition->dims[0] * requisition->dims[1] * sizeof(float),
                                                             0, NULL, NULL));
-            for (i = 1; i < priv->distance->n_values; i++) {
+            for (i = 0; i < priv->distance->n_values; i++) {
+                distance = g_value_get_double (g_value_array_get_nth (priv->distance, i));
                 current_in_mem = ufo_buffer_get_device_array (inputs[i], cmd_queue);
-                UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->freq_sum_kernel, 0, sizeof (cl_mem), &in_sum_mem));
-                UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->freq_sum_kernel, 1, sizeof (cl_mem), &current_in_mem));
-                UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->freq_sum_kernel, 2, sizeof (cl_mem), &in_sum_mem));
-                ufo_profiler_call (profiler, cmd_queue, priv->freq_sum_kernel, requisition->n_dims, requisition->dims, NULL);
+                UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->freq_sum_kernel, 0, sizeof (cl_mem), &current_in_mem));
+                UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->freq_sum_kernel, 1, sizeof (gfloat), &distance));
+                UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->freq_sum_kernel, 2, sizeof (guint), &priv->distance->n_values));
+                UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->freq_sum_kernel, 3, sizeof (gfloat), &lambda));
+                UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->freq_sum_kernel, 4, sizeof (gfloat), &priv->pixel_size));
+                UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->freq_sum_kernel, 5, sizeof (cl_mem), &in_sum_mem));
+                ufo_profiler_call (profiler, cmd_queue, priv->freq_sum_kernel, requisition->n_dims, global_work_size, NULL);
             }
             in_mem = in_sum_mem;
         } else {

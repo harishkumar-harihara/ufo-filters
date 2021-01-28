@@ -69,13 +69,21 @@ ctf_multidistance_method(global float *distances,
 {
     COMMON_FREQUENCY_SETUP;
     float result = 0.0f;
-    float k_2 = n_idx * n_idx / pixel_size / pixel_size + n_idy * n_idy / pixel_size / pixel_size;
+    float prefac = M_PI * wavelength * (n_idx * n_idx / pixel_size / pixel_size + n_idy * n_idy / pixel_size / pixel_size);
+    float sin_arg, sin_value;
 
     for (unsigned int i = 0; i < num_distances; i++) {
-        result += 2 * sin (M_PI * wavelength * k_2 * distances[i]);
+        sin_value = sin (prefac * distances[i]);
+        result += sin_value * sin_value;
+    }
+    if (idx == 0 && idy == 0) {
+        // Reularize only zero frequency
+        result = pow(10, -regularize_rate);
+    } else {
+        result *= 2.0f / num_distances;
     }
 
-    output[idy * width + idx] = 1.0f / (result + pow(10, -regularize_rate));
+    output[idy * width + idx] = 1.0f / result;
 }
 
 kernel void
@@ -113,4 +121,23 @@ mult_by_value(global float *input, global float *values, global float *output)
      * interleaved. Thus, two consecutive *input* values are multiplied by the
      * same filter value. */
     output[idx] = input[idx] * values[idx >> 1];
+}
+
+/**
+ * Sum of the intensity FT multiplied by the sine in the CTD method.
+ */
+kernel void
+ctf_multi_add_frequencies(global float *input,
+                          float dist,
+                          unsigned int num_distances,
+                          float wavelength,
+                          float pixel_size,
+                          global float *output)
+{
+    COMMON_FREQUENCY_SETUP;
+    float sin_value = sin (M_PI * wavelength * dist * (n_idx * n_idx / pixel_size / pixel_size + n_idy * n_idy / pixel_size / pixel_size)) / num_distances;
+    int index = idy * 2 * width + 2 * idx;
+
+    output[index] += input[index] * sin_value;
+    output[index + 1] += input[index + 1] * sin_value;
 }
