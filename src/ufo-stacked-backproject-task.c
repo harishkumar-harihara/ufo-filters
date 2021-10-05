@@ -68,6 +68,7 @@ struct _UfoStackedBackprojectTaskPrivate {
     gint roi_width;
     gint roi_height;
     Precision precision;
+    size_t out_mem_size;
 };
 
 static void ufo_task_interface_init (UfoTaskIface *iface);
@@ -309,6 +310,8 @@ ufo_stacked_backproject_task_process (UfoTask *task,
     out_mem = ufo_buffer_get_device_array (output, cmd_queue);
     profiler = ufo_task_node_get_profiler (UFO_TASK_NODE (task));
 
+    ufo_profiler_enable_tracing(profiler,TRUE);
+
     /* Guess axis position if they are not provided by the user. */
     if (priv->axis_pos <= 0.0) {
         UfoRequisition in_req;
@@ -349,13 +352,13 @@ ufo_stacked_backproject_task_process (UfoTask *task,
         buffer_size = sizeof(cl_float4) * dim_x * dim_y * quotient;
         format.image_channel_data_type = CL_HALF_FLOAT;
     }else if(priv->precision == INT8){
-        quotient = requisition->dims[2]/4;
+        quotient = requisition->dims[2]/8;
         kernel_interleave = priv->interleave_uint;
         kernel_texture = priv->texture_uint;
         kernel_uninterleave = priv->uninterleave_uint;
         format.image_channel_order = CL_RGBA;
-        format.image_channel_data_type = CL_UNSIGNED_INT8;
-        buffer_size = sizeof(cl_uint4) * dim_x * dim_y * quotient;
+        format.image_channel_data_type = CL_UNSIGNED_INT32;
+        buffer_size = sizeof(cl_uint8) * dim_x * dim_y * quotient;
     }
 
     cl_image_desc imageDesc;
@@ -425,6 +428,10 @@ ufo_stacked_backproject_task_process (UfoTask *task,
         UFO_RESOURCES_CHECK_CLERR(clReleaseMemObject(reconstructed_buffer));
     }
 
+    size_t temp_size;
+    clGetMemObjectInfo(out_mem, CL_MEM_SIZE, sizeof(temp_size), &temp_size, NULL);
+    priv->out_mem_size += temp_size;
+    fprintf(stdout, "Time taken GPU: %f Size: %zu \n", ufo_profiler_elapsed(profiler,UFO_PROFILER_TIMER_GPU),priv->out_mem_size);
     return TRUE;
 }
 
@@ -715,5 +722,6 @@ ufo_stacked_backproject_task_init(UfoStackedBackprojectTask *self)
     priv->luts_changed = TRUE;
     priv->roi_x = priv->roi_y = 0;
     priv->roi_width = priv->roi_height = 0;
+    priv->out_mem_size = 0;
     priv->precision = SINGLE;
 }

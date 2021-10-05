@@ -258,6 +258,9 @@ uninterleave_half (global float4 *reconstructed_buffer,
     output[idx + idy*sizex + (output_offset+3)*sizex*sizey] = b.w;
 }
 
+//union converter { uint storage; uchar4 a; };
+union converter { uint2 storage; uchar8 a; };
+
 kernel void
 interleave_uint (global float *sinogram,
             write_only image2d_array_t interleaved_sinograms,
@@ -270,22 +273,35 @@ interleave_uint (global float *sinogram,
     const int sizex = get_global_size(0);
     const int sizey = get_global_size(1);
 
-    int sinogram_offset = idz*4;
+    int sinogram_offset = idz*8;
 
     const float scale = 255.0f / (max - min);
 
-    uint4 b = {(sinogram[idx + idy * sizex + (sinogram_offset) * sizex * sizey] - min)*scale,
-               (sinogram[idx + idy * sizex + (sinogram_offset+1) * sizex * sizey] - min)*scale,
-               (sinogram[idx + idy * sizex + (sinogram_offset+2) * sizex * sizey] - min)*scale,
-               (sinogram[idx + idy * sizex + (sinogram_offset+3) * sizex * sizey] - min)*scale};
+    union converter il;
+    il.a.s0 = (sinogram[idx + idy * sizex + (sinogram_offset) * sizex * sizey] - min)*scale;
+    il.a.s1 = (sinogram[idx + idy * sizex + (sinogram_offset+1) * sizex * sizey] - min)*scale;
+    il.a.s2 = (sinogram[idx + idy * sizex + (sinogram_offset+2) * sizex * sizey] - min)*scale;
+    il.a.s3 = (sinogram[idx + idy * sizex + (sinogram_offset+3) * sizex * sizey] - min)*scale;
+    il.a.s4 = (sinogram[idx + idy * sizex + (sinogram_offset+4) * sizex * sizey] - min)*scale;
+    il.a.s5 = (sinogram[idx + idy * sizex + (sinogram_offset+5) * sizex * sizey] - min)*scale;
+    il.a.s6 = (sinogram[idx + idy * sizex + (sinogram_offset+6) * sizex * sizey] - min)*scale;
+    il.a.s7 = (sinogram[idx + idy * sizex + (sinogram_offset+7) * sizex * sizey] - min)*scale;
 
-   write_imageui(interleaved_sinograms, (int4)(idx, idy, idz, 0),(uint4)(b));
+    /*if(get_global_id(0)==0 && get_global_id(1)==0 && get_global_id(2)==0){
+        //printf("\n Union values: %u \n",il.storage);
+        printf("\n Size of il.storage: %d \n",sizeof(il.storage));
+        printf("\n Size of il.a: %d \n",sizeof(il.a));
+    }*/
+
+    write_imageui(interleaved_sinograms, (int4)(idx, idy, idz, 0),(uint4)((uint)il.storage.x,(uint)il.storage.y,0,0));
 }
+
+
 
 kernel void
 texture_uint (
         read_only image2d_array_t sinogram,
-        global uint4 *reconstructed_buffer,
+        global uint8 *reconstructed_buffer,
         constant float *sin_lut,
         constant float *cos_lut,
         const unsigned int x_offset,
@@ -308,12 +324,12 @@ texture_uint (
         int global_sizex = get_global_size(0);
         int global_sizey = get_global_size(1);
 
-        /* Computing sequential numbers of 4x4 square, quadrant, and pixel within quadrant */
+        // Computing sequential numbers of 4x4 square, quadrant, and pixel within quadrant
         int square = local_idy%4;
         int quadrant = local_idx/4;
         int pixel = local_idx%4;
 
-        /* Computing projection and pixel offsets */
+        // Computing projection and pixel offsets
         int projection_index = local_idy/4;
         int2 remapped_index_local   = {(4*square + 2*(quadrant%2) + (pixel%2)),(2* (quadrant/2) + (pixel/2))};
         int2 remapped_index_global  = {(get_group_id(0)*get_local_size(0)+remapped_index_local.x),
@@ -321,23 +337,35 @@ texture_uint (
 
         float2 pixel_coord = {(remapped_index_global.x-axis_pos+x_offset+0.5f), (remapped_index_global.y-axis_pos+y_offset+0.5f)}; //bx and by
 
-        uint4 sum[4] = {0,0,0,0};
-        __local uint4 shared_mem[64][4];
-        __local uint4 reconstructed_cache[16][16];
+        uint8 sum[4] = {0,0,0,0};
+        __local uint8 shared_mem[64][4];
+        __local uint8 reconstructed_cache[16][16];
+
+        union converter tex;
 
         for(int proj = projection_index; proj < n_projections; proj+=4) {
             float sine_value = sin_lut[angle_offset + proj];
             float h = pixel_coord.x * cos_lut[angle_offset + proj] - pixel_coord.y * sin_lut[angle_offset + proj] + axis_pos;
             for(int q=0; q<4; q+=1){
-               sum[q] += read_imageui(sinogram, volumeSampler_int8, (float4)(h-4*q*sine_value, proj + 0.5f,idz, 0.0));
+               tex.storage = read_imageui(sinogram, volumeSampler_int8, (float4)(h-4*q*sine_value, proj + 0.5f,idz, 0.0)).xy;
+               /*if(get_global_id(0)==0 && get_global_id(1)==0 && get_global_id(2)==0){
+                   printf("\n Texture Union values: %u \n",tex.storage);
+               }*/
+               sum[q].s0 += (uint)tex.a.s0;
+               sum[q].s1 += (uint)tex.a.s1;
+               sum[q].s2 += (uint)tex.a.s2;
+               sum[q].s3 += (uint)tex.a.s3;
+               sum[q].s4 += (uint)tex.a.s4;
+               sum[q].s5 += (uint)tex.a.s5;
+               sum[q].s6 += (uint)tex.a.s6;
+               sum[q].s7 += (uint)tex.a.s7;
             }
         }
-
 
         int2 remapped_index = {(local_idx%4), (4*local_idy + (local_idx/4))};
 
         for(int q=0; q<4;q+=1){
-            /* Moving partial sums to shared memory */
+            // Moving partial sums to shared memory
             shared_mem[(local_sizex*remapped_index_local.y + remapped_index_local.x)][projection_index] = sum[q];
 
             barrier(CLK_LOCAL_MEM_FENCE); // syncthreads
@@ -359,7 +387,7 @@ texture_uint (
 }
 
 kernel void
-uninterleave_uint (global uint4 *reconstructed_buffer,
+uninterleave_uint (global uint8 *reconstructed_buffer,
                 global float *output,
                 const float min,
                 const float max)
@@ -370,11 +398,15 @@ uninterleave_uint (global uint4 *reconstructed_buffer,
     const int sizex = get_global_size(0);
     const int sizey = get_global_size(1);
 
-    int output_offset = idz*4;
+    int output_offset = idz*8;
     float scale = (max-min)/255.0f;
 
-    output[idx + idy*sizex + (output_offset)*sizex*sizey] = (reconstructed_buffer[idx + idy*sizex + idz*sizex*sizey].x)*scale+min;
-    output[idx + idy*sizex + (output_offset+1)*sizex*sizey] = (reconstructed_buffer[idx + idy*sizex + idz*sizex*sizey].y)*scale+min;
-    output[idx + idy*sizex + (output_offset+2)*sizex*sizey] = (reconstructed_buffer[idx + idy*sizex + idz*sizex*sizey].z)*scale+min;
-    output[idx + idy*sizex + (output_offset+3)*sizex*sizey] = (reconstructed_buffer[idx + idy*sizex + idz*sizex*sizey].w)*scale+min;
+    output[idx + idy*sizex + (output_offset)*sizex*sizey] = (reconstructed_buffer[idx + idy*sizex + idz*sizex*sizey].s0)*scale+min;
+    output[idx + idy*sizex + (output_offset+1)*sizex*sizey] = (reconstructed_buffer[idx + idy*sizex + idz*sizex*sizey].s1)*scale+min;
+    output[idx + idy*sizex + (output_offset+2)*sizex*sizey] = (reconstructed_buffer[idx + idy*sizex + idz*sizex*sizey].s2)*scale+min;
+    output[idx + idy*sizex + (output_offset+3)*sizex*sizey] = (reconstructed_buffer[idx + idy*sizex + idz*sizex*sizey].s3)*scale+min;
+    output[idx + idy*sizex + (output_offset+4)*sizex*sizey] = (reconstructed_buffer[idx + idy*sizex + idz*sizex*sizey].s4)*scale+min;
+    output[idx + idy*sizex + (output_offset+5)*sizex*sizey] = (reconstructed_buffer[idx + idy*sizex + idz*sizex*sizey].s5)*scale+min;
+    output[idx + idy*sizex + (output_offset+6)*sizex*sizey] = (reconstructed_buffer[idx + idy*sizex + idz*sizex*sizey].s6)*scale+min;
+    output[idx + idy*sizex + (output_offset+7)*sizex*sizey] = (reconstructed_buffer[idx + idy*sizex + idz*sizex*sizey].s7)*scale+min;
 }

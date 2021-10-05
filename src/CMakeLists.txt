@@ -80,6 +80,7 @@ set(ufofilter_SRCS
     ufo-sliding-stack-task.c
     ufo-stack-task.c
     ufo-stacked-backproject-task.c
+    ufo-stacked-forwardproject-task.c
     ufo-stdin-task.c
     ufo-stitch-task.c
     ufo-tile-task.c
