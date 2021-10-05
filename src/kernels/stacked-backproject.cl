@@ -287,12 +287,6 @@ interleave_uint (global float *sinogram,
     il.a.s6 = (sinogram[idx + idy * sizex + (sinogram_offset+6) * sizex * sizey] - min)*scale;
     il.a.s7 = (sinogram[idx + idy * sizex + (sinogram_offset+7) * sizex * sizey] - min)*scale;
 
-    /*if(get_global_id(0)==0 && get_global_id(1)==0 && get_global_id(2)==0){
-        //printf("\n Union values: %u \n",il.storage);
-        printf("\n Size of il.storage: %d \n",sizeof(il.storage));
-        printf("\n Size of il.a: %d \n",sizeof(il.a));
-    }*/
-
     write_imageui(interleaved_sinograms, (int4)(idx, idy, idz, 0),(uint4)((uint)il.storage.x,(uint)il.storage.y,0,0));
 }
 
@@ -348,9 +342,7 @@ texture_uint (
             float h = pixel_coord.x * cos_lut[angle_offset + proj] - pixel_coord.y * sin_lut[angle_offset + proj] + axis_pos;
             for(int q=0; q<4; q+=1){
                tex.storage = read_imageui(sinogram, volumeSampler_int8, (float4)(h-4*q*sine_value, proj + 0.5f,idz, 0.0)).xy;
-               /*if(get_global_id(0)==0 && get_global_id(1)==0 && get_global_id(2)==0){
-                   printf("\n Texture Union values: %u \n",tex.storage);
-               }*/
+
                sum[q].s0 += (uint)tex.a.s0;
                sum[q].s1 += (uint)tex.a.s1;
                sum[q].s2 += (uint)tex.a.s2;

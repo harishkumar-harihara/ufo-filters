@@ -93,12 +93,8 @@
          for(int proj = projection_index; proj < l; proj+=4) {
              for(int q=0; q<4; q+=1){
                     sum[q] += read_imagef(slices, volumeSampler_single, (float4)((float2)sample+q*N,idz,0.0f)).xy;
-                    //sample += N;
+                    sample += N;
             }
-         }
-
-         if(get_global_id(0)==200 && get_global_id(1)==200 && get_global_id(2)==0){
-             printf("\n %f %f %f %f",sum[0],sum[1],sum[2],sum[3]);
          }
 
          int2 remapped_index = {(local_idx%4), (4*local_idy + (local_idx/4))};
@@ -120,10 +116,6 @@
                  reconstructed_cache[4*q+remapped_index.y/16][remapped_index.y%16] = shared_mem[remapped_index.y][0];
              }
              barrier(CLK_LOCAL_MEM_FENCE); // syncthreads
-         }
-
-         if(get_global_id(0)==200 && get_global_id(1)==200 && get_global_id(2)==0){
-            printf("\n %f ",reconstructed_cache[local_idy][local_idx]);
          }
 
          reconstructed_buffer[global_idx + global_idy*size + idz*size*size] = (reconstructed_cache[local_idy][local_idx]);

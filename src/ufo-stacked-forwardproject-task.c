@@ -124,11 +124,7 @@ ufo_stacked_forwardproject_task_get_requisition (UfoTask *task,
     if (priv->axis_pos == -G_MAXFLOAT) {
         priv->axis_pos = in_req.dims[0] / 2.0f;
     }
-/*
-    fprintf(stdout, "n_dims: %u\n",requisition->n_dims);
-    fprintf(stdout, "dims[0]: %lu\n",requisition->dims[0]);
-    fprintf(stdout, "dims[1]: %lu\n",requisition->dims[1]);
-    fprintf(stdout, "dims[2]: %lu\n",requisition->dims[2]);*/
+
 }
 
 static guint
