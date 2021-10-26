@@ -24,6 +24,7 @@
 #include <CL/cl.h>
 #endif
 
+#include <stdio.h>
 #include "ufo-forwardproject-task.h"
 
 
@@ -138,12 +139,16 @@ ufo_forwardproject_task_process (UfoTask *task,
     out_mem = ufo_buffer_get_device_array (output, cmd_queue);
     profiler = ufo_task_node_get_profiler (UFO_TASK_NODE (task));
 
+    ufo_profiler_enable_tracing(profiler,TRUE);
+
     UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->kernel, 0, sizeof (cl_mem), &in_mem));
     UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->kernel, 1, sizeof (cl_mem), &out_mem));
     UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->kernel, 2, sizeof (gfloat), &priv->axis_pos));
     UFO_RESOURCES_CHECK_CLERR (clSetKernelArg (priv->kernel, 3, sizeof (gfloat), &priv->angle_step));
 
     ufo_profiler_call (profiler, cmd_queue, priv->kernel, 2, requisition->dims, NULL);
+
+    fprintf(stdout, "Time taken: %f \n",ufo_profiler_elapsed(profiler,UFO_PROFILER_TIMER_GPU));
 
     return TRUE;
 }

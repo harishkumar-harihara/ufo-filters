@@ -47,6 +47,44 @@ interleave_single ( global float *sinogram,
     write_imagef(interleaved_sinograms, (int4)(idx, idy, idz, 0),(float4)(x,y,0.0f,0.0f));
 }
 
+/*kernel void
+texture_single (
+        read_only image2d_array_t sinogram,
+        global float2 *reconstructed_buffer,
+        constant float *sin_lut,
+        constant float *cos_lut,
+        const unsigned int x_offset,
+        const unsigned int y_offset,
+        const unsigned int angle_offset,
+        const unsigned int n_projections,
+        const float axis_pos,
+        unsigned long size){
+
+    const int idx = get_global_id(0);
+    const int idy = get_global_id(1);
+    const int idz = get_global_id(2);
+
+    const float bx = idx - axis_pos + x_offset + 0.5f;
+    const float by = idy - axis_pos + y_offset + 0.5f;
+
+    if(idx == 200 && idy == 200 && idz == 0){
+        printf("\n bx: %f by: %f \n",bx,by);
+    }
+
+    float2 sum = {0.0f,0.0f};
+
+    for(int proj = 0; proj < n_projections; proj++) {
+        float h = bx * cos_lut[angle_offset + proj] - by * sin_lut[angle_offset + proj] + axis_pos;
+        sum += read_imagef (sinogram, volumeSampler_single, (float4)(h, proj + 0.5f, idz, 0.0f)).xy;
+    }
+
+    if(idx == 200 && idy == 200 && idz == 0){
+        printf("\n Sum: %f \n",sum.x);
+    }
+
+    reconstructed_buffer[idx + idy*size + idz*size*size] = sum * M_PI_F / n_projections;
+}*/
+
 kernel void
 texture_single (
         read_only image2d_array_t sinogram,
@@ -73,12 +111,12 @@ texture_single (
         int global_sizex = get_global_size(0);
         int global_sizey = get_global_size(1);
 
-        /* Computing sequential numbers of 4x4 square, quadrant, and pixel within quadrant */
+        // Computing sequential numbers of 4x4 square, quadrant, and pixel within quadrant
         int square = local_idy%4;
         int quadrant = local_idx/4;
         int pixel = local_idx%4;
 
-        /* Computing projection and pixel offsets */
+        // Computing projection and pixel offsets
         int projection_index = local_idy/4;
 
         int2 remapped_index_local   = {(4*square + 2*(quadrant%2) + (pixel%2)),
@@ -94,19 +132,21 @@ texture_single (
         __local float2 shared_mem[64][4];
         __local float2 reconstructed_cache[16][16];
 
-
         for(int proj = projection_index; proj < n_projections; proj+=4) {
             float sine_value = sin_lut[angle_offset + proj];
             float h = pixel_coord.x * cos_lut[angle_offset + proj] - pixel_coord.y * sin_lut[angle_offset + proj] + axis_pos;
             for(int q=0; q<4; q+=1){
                    sum[q] += read_imagef(sinogram, volumeSampler_single, (float4)(h-4*q*sine_value, proj + 0.5f,idz, 0.0)).xy;
+                   if(global_idx == 200 && global_idy == 200 && idz == 0){
+                        printf("\n i: %d x: %f y: %f \n",proj,h-4*q*sine_value,proj+0.5f);
+                   }
             }
         }
 
         int2 remapped_index = {(local_idx%4), (4*local_idy + (local_idx/4))};
 
         for(int q=0; q<4;q+=1){
-            /* Moving partial sums to shared memory */
+            // Moving partial sums to shared memory
             shared_mem[(local_sizex*remapped_index_local.y + remapped_index_local.x)][projection_index] = sum[q];
 
             barrier(CLK_LOCAL_MEM_FENCE); // syncthreads
@@ -122,6 +162,10 @@ texture_single (
                 reconstructed_cache[4*q+remapped_index.y/16][remapped_index.y%16] = shared_mem[remapped_index.y][0];
             }
             barrier(CLK_LOCAL_MEM_FENCE); // syncthreads
+        }
+
+        if(global_idx == 200 && global_idy == 200 && idz == 0){
+            printf("\n Sum: %f \n",reconstructed_cache[local_idy][local_idx].x);
         }
 
         reconstructed_buffer[global_idx + global_idy*size + idz*size*size] = reconstructed_cache[local_idy][local_idx] * M_PI_F / n_projections;
